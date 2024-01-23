@@ -1,23 +1,32 @@
-local loadMusicFiles =false
+local loadMusicFiles = false
 local lang = "English" -- English, Russian
-local assetsPath = string.gsub(require('shell').resolve(require('process').info().path),'buckshot', "Buckshot_Data/")
-local gpuBuffers = false
+local projectName = 'buckshot'
+local assetsPath = string.gsub(string.gsub(require('shell').resolve(require('process').info().path), projectName, "Buckshot_Data/"), 'CrushHandler', "Buckshot_Data/")
+local gpuBuffers = true
 --Enjoy!
 --Oleshe, original by Mike Klubnika, check and buy original game on itch.io!
---If you right owner and want ur conted to be deleted, please, contact with me
+--If you right owner and want you are content to be deleted, please, contact with me
 local cmp = require('component')
 local event = require('event')
 local uni = require('unicode')
 local fs = require('filesystem')
 local seriala = require('serialization')
 local gpu = cmp.gpu
-local allocatedBuffer
+local function updateState(state)
+    gpu.set(1,50,state..string.rep(' ',160))
+    if gpuBuffers then
+        gpu.bitblt()
+    end
+end
+updateState("Loading main")
 local lastEvent = {}
 local ingoreBackspace
 local buttons = {}
 local callEverytime = {}
 local deltaTime = 0
 local scripts = {}
+local removeFromETList = {}
+local addFromETList = {}
 local timeWas = os.clock()
 local methods = {}
 local UI = {}
@@ -34,9 +43,10 @@ local itemsID = {
     vape = 4,
     saw = 5
 }
-local function getID()
+function methods.getID()
     return math.random(0,999999999)
 end
+updateState("Loading keyboard")
 local keyboard = {
   
   ['1'] = 2,
@@ -90,6 +100,7 @@ local keyCodes = {}
 for i,v in pairs(keyboard) do
   keyCodes[v] = i
 end
+updateState("Loading colors")
 local function hexToRgb(integerColor)
   return integerColor >> 16, integerColor >> 8 & 0xFF, integerColor & 0xFF
 end
@@ -108,6 +119,7 @@ local function blend(src, filter)
 end
 gpu.setForeground(0xFFFFFF)
 gpu.setBackground(0x111111)
+updateState("Loading filesystem")
 function methods.read(path,sound)
   if fs.exists(path) then
     local bonus = 0
@@ -126,18 +138,25 @@ function methods.read(path,sound)
       os.exit(1)    
   end
 end
-function methods.busyLoop(time)
-  local start = os.clock()
-  while start+time > os.clock() do end
-end
 function methods.write(path, data)
   local handle = io.open(path,'w')
   handle:write(data)
   handle:close()
   return true
 end
+updateState("Loading scripts pre-init")
+function methods.busyLoop(time)
+  local start = os.clock()
+  while start+time > os.clock() do end
+end
 function methods.execute(name,method)
-    return scripts[name][method]()
+    if scripts[name] then
+        if scripts[name][method] then
+            return scripts[name][method]()
+        end
+    end
+    print("Scripts not found: ".. name ..'.'..method)
+    os.sleep(2)
 end
 --Reading all scripts and making data base
 local scriptsPath = assetsPath .. 'Scripts/'
@@ -161,6 +180,7 @@ end
 --flush
 gpu.fill(1,1,160,50,"")
 --UI
+updateState("Loading UI")
 local function isPointInside(object, x, y)
   return 
     x >= object.x and
@@ -177,18 +197,20 @@ local function click(x,y,mb)
 end
 -- UI elements
 function methods.inputHandler()
-  local index = getID()
-  local toEnd = {text = "",onInputFinished = function() end, close = function() callEverytime[index] = nil ignoreBackspace = false end}
+  local index = methods.getID()
+  local toEnd = {text = "",onInputFinished = function() end,maxInputLen = math.huge, close = function() methods.removeFromET(index) ignoreBackspace = false end}
   callEverytime[index] = function() 
     if lastEvent[1] == 'key_down' then
       if lastEvent[4] == keyboard.BACKSPACE then
         toEnd.text = string.sub(toEnd.text,1,string.len(toEnd.text)-1)
       elseif lastEvent[4] == keyboard.ENTER then
-        callEverytime[index] = nil
         toEnd.onInputFinished()
+        toEnd.close()
       else
         if keyCodes[lastEvent[4]] then
-            toEnd.text = toEnd.text .. keyCodes[lastEvent[4]]
+            if uni.len(toEnd.text) < toEnd.maxInputLen then
+                toEnd.text = toEnd.text .. keyCodes[lastEvent[4]]
+            end
         end
       end
     end
@@ -197,22 +219,29 @@ function methods.inputHandler()
   return toEnd
 end
 function methods.button(x,y,w,h,color,colorText,text,onClick)
-  local textIndex, buttonsIndex, panelIndex = getID(), getID(), getID()
+  local textIndex, buttonsIndex, panelIndex = methods.getID(), methods.getID(), methods.getID()
   buttons[buttonsIndex]={x=x,y=y,w=w,h=h,onClick=onClick}
   UI[panelIndex]={type=types.panel,x=x,y=y,w=w,h=h,color=color}
   UI[textIndex] = {type=types.text,x=x+math.ceil(w/2)-math.ceil(uni.len(text)/2),y=y+math.ceil(h/2)-1,text=text,color=colorText}
   return {buttonsIndex,panelIndex,textIndex}
 end
 function methods.text(x,y,color,text)
-  ID = getID()
+  ID = methods.getID()
   UI[ID] = {type=types.text,x=x,y=y,text=text,color=color}
   return ID
 end
 function methods.panel(x,y,w,h,color)
-  ID = getID()
+  ID = methods.getID()
   UI[ID] = {type=types.panel,x=x,y=y,w=w,h=h,color=color}
   return ID
 end
+function methods.flushUI()
+    UI = {}
+end
+function methods.removeFromET(what)
+    table.insert(removeFromETList,what)
+end
+updateState("Loading engine features")
 function methods.tick(skipET) -- skipEveryTime thing
   deltaTime = os.clock()-timeWas
   timeWas = os.clock()
@@ -221,6 +250,12 @@ function methods.tick(skipET) -- skipEveryTime thing
       v(i)
     end
   end
+  for i = 1, #removeFromETList do
+    if callEverytime[removeFromETList[i]] then
+        callEverytime[removeFromETList[i]] = nil
+    end
+  end
+  removeFromETList = {}
   gpu.setBackground(0x111111)
   gpu.fill(1,1,160,50, " ")
   for _, v in pairs(UI) do
@@ -239,37 +274,33 @@ function methods.tick(skipET) -- skipEveryTime thing
   end
 end
 --main init
-local currentShells = {}
-local dealerInventory = { [0] = 9,
-    0,0,0,
-    0,0,0,
-    0,0,0
-}
-local playerInventory = { [0] = 9,
-    0,0,0,
-    0,0,0,
-    0,0,0
-}
-local dealerEnergy = 2
-local playerEnergy = 2
-local PLAYERNICKNAME = "TEST"
-function methods.fadeIn()
-  colorFilter = 0x010101
-  while true do
-    colorFilter = colorFilter + 0x010101
-    methods.tick(true)
-    methods.busyLoop(0.0001)
-    if colorFilter == 0xFFFFFF then
-      break
+function methods.fadeIn(time, to)
+  time = time or 2
+  to = to or 0xFFFFFF
+  local neededDeltaTime = to/time
+  local ID = methods.getID()
+  callEverytime[ID] = function()
+    colorFilter = colorFilter + 0x010101 * deltaTime
+    if colorFilter > to then
+        removeFromET(ID)
     end
   end
 end
+function methods.fadeOut(time, to)
+  to = to or 0x010101*2
+    while colorFilter > to do
+      colorFilter = colorFilter - 0x010101
+      methods.tick(true)
+      methods.busyLoop(0.001)
+    end
+end
 --loading sound stuff
+updateState("Loading sound")
 local musicFilesCashe = {}
 local sounds
 local soundsPath = assetsPath.."Sounds/"
 if loadMusicFiles then
-  sounds = {"Before Every Load","General Release","Socket Calibration","You are an Angel"}
+  sounds = {"Before Every Load","70K","General Release","Socket Calibration","You are an Angel"}
   for i = 1, #sounds do
     local currentLoading = soundsPath..sounds[i]..".dfpwm"
     sounds[sounds[i]] = methods.read(currentLoading,true)
@@ -284,10 +315,14 @@ function methods.playSound(name, fadeIn)
     tape.seek(-tape.getSize())
     tape.write(string.rep("",tape.getSize()))
     tape.seek(-tape.getSize())
+    local songLenght
     if loadMusicFiles then
       tape.write(sounds[name])
+      songLenght = #sounds[name]
     else
-      tape.write(methods.read(soundsPath..name..'.dfpwm',true))
+      local data = methods.read(soundsPath..name..'.dfpwm',true)
+      songLenght = #data
+      tape.write(data)
       os.sleep(0)
     end
     tape.seek(-tape.getSize())
@@ -297,18 +332,25 @@ function methods.playSound(name, fadeIn)
     local i = 0
     local need = 0
     local speed = 0.5
-    ID = getID()
+    local ID = methods.getID()
     callEverytime[ID] = function()
       need = deltaTime + need
       if need >= speed then
         need = 0
         i = i + 0.1
         if i == 1 then
-          callEverytime[ID] = nil
+          methods.removeFromET(ID)
           return
         end
         tape.setVolume(i)
       end
+    end
+    local ID2 = methods.getID()
+    callEverytime[ID2] = function()
+        if tape.getPosition() >= songLenght then
+            tape.seek(-math.huge)
+            tape.play()
+        end
     end
     tape.setLabel(name)
     tape.play()
@@ -320,30 +362,13 @@ function methods.stopSounds()
     while true do
       i = i - 0.1
       methods.busyLoop(0.2)
-      cmp.tape_drive.setVolume(i)
       if i <= 0 then
         break
       end
+      cmp.tape_drive.setVolume(i)
     end
     cmp.tape_drive.stop()
   end
-end
---UI makers, like when we show energy or our side of table
-local function showEnergy()
-  while true do
-    colorFilter = colorFilter - 0x010101
-    tick(true)
-    busyLoop(0.001)
-    if colorFilter <= 0x010101*2 then
-      break
-    end
-  end
-  UI = {} -- flush ui
-  text(30,15,0x808080,'DEALER')
-  text(30,16,0x50AA50,string.rep(symbols.energy,dealerEnergy))
-  text(124,15,0x808080,PLAYERNICKNAME)
-  text(124,16,0x50AA50,string.rep(symbols.energy,playerEnergy))
-  fadeIn()
 end
 local function makeCurrentShells(roundNum)
     local shellsCount
@@ -480,27 +505,11 @@ local function initRound(roundNum)
   os.sleep(1)
   UI = {}
   makeItems(roundNum)
-end--[[
-local len = math.ceil(uni.len(loc.yourName))
-local currentTextIndex = text(160/2-len,25,0xFFFFFF,loc.yourName)
-local playerNameTextIndex = text(160/2-len,26,0xFFFFFF,'')
-local inputHandle = inputHandler()
-local indexOfHandleToText
-indexOfHandleToText = getID()
-callEverytime[indexOfHandleToText] = function() UI[playerNameTextIndex].text = inputHandle.text end
-inputHandle.onInputFinished = function()
-  callEverytime[indexOfHandleToText] = nil
-  UI[currentTextIndex] = nil
-  UI[playerNameTextIndex] = nil
-  PLAYERNICKNAME = inputHandle.text
-  inputHandle = nil
-  os.sleep(1)
-  initRound(2)
 end
-tick()]]
+updateState("Compiling scripts...")
 -- Big thanks to fingercomp bc i dont know how is this shi works
 local globalEnv = setmetatable({}, {__index = _ENV})
-local function runScript(code, privateVars)
+local function runScript(code, privateVars, name)
   local vars = {}
   local sharedNames = {}
   local privateNames = {}
@@ -538,7 +547,7 @@ local function runScript(code, privateVars)
     end,
   }
 
-  assert(load(code, "@UNKNOWNENGINESCRIPT.lua", "t", setmetatable({}, envMeta)))()
+  assert(load(code, name, nil, setmetatable({}, envMeta)))()
 
   return vars
 end
@@ -559,19 +568,27 @@ function methods.deepcopy(orig) -- For 'load scene'
 end
 function methods.invoke(code,time)
     local timeWas = os.clock()
-    table.insert(callEverytime, function(selfIndex)
+    local id = methods.getID()
+    callEverytime[id] = function()
         if timeWas + time < os.clock() then
+            methods.removeFromET(id)
             code()
-            table.remove(callEverytime,selfIndex)
         end
-    end)
+    end
+end
+function methods.colorFilterSet(color)
+    colorFilter = color
 end
 --Compiling scripts
-for i = 1, #scriptsFolderList do
-    local nowMethods = methods.deepcopy(methods)
-    nowMethods.loc = loc
-    nowMethods.UI = UI
-    scripts[string.gsub(scriptsFolderList[i],'.lua','')] = runScript(methods.read(scriptsPath..'/'..scriptsFolderList[i]),nowMethods)
+local nowMethods = methods.deepcopy(methods)
+nowMethods.loc = loc
+nowMethods.callEverytime = callEverytime
+nowMethods.UI = UI
+nowMethods.symbols = symbols
+nowMethods.scripts = scripts
+for i = 1, #scriptsFolderList do 
+    scripts[string.gsub(scriptsFolderList[i],'.lua','')] = runScript(methods.read(scriptsPath..'/'..scriptsFolderList[i]), nowMethods, scriptsFolderList[i])
+    os.sleep(0)
 end
 --Executeing all Scripts
 for i, v in pairs(scripts) do
@@ -579,16 +596,27 @@ for i, v in pairs(scripts) do
         v["Start"]()
     end
 end
+function methods.exit()
+    --Stop stound
+    methods.fadeOut()
+    methods.stopSounds()
+    --Restoring defaults
+    gpu.setActiveBuffer(0)
+    gpu.freeBuffer(allocatedBuffer)
+    gpu.setForeground(0xFFFFFF)
+    gpu.setBackground(0x0)
+    require('term').clear()
+    --Bye!
+    os.exit(0)
+end
+updateState("Starting!")
 --main loop
 while true do
   local name,_,e1,e2,e3 = event.pull(0)
   lastEvent = {name,"",e1,e2,e3}
   if name == 'key_up' then
     if e2 == 14 and not ignoreBackspace then
-      require('term').clear()
-      gpu.setActiveBuffer(0)
-      methods.stopSounds()
-      return false
+      methods.exit()
     end
   end
   if name == 'touch' then

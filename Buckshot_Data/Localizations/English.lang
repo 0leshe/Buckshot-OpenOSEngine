@@ -1,7 +1,7 @@
 {
-  Test =  "Test!",
   welcomeMessage = "Welcome",
-  yourName = "Your name",
+  yourName = "Waiver for ..",
   shotgun = 'Shotgun',
-  shotgunTip = "Shoot yourself or dealer. Shooting yourself skips dealer turn."
+  dealer = 'DEALER',
+  shotgunTip = "Shoot yourself or dealer. Shooting yourself skips dealer's turn."
 }
