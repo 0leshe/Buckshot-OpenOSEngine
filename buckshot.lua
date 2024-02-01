@@ -1,19 +1,27 @@
 local loadMusicFiles = false
+local lowMemory = false --!Dont use it now, unless you need more emotions from sound. That will reduce RAM costs when loading big files, but will take more time (Check lowMemoryBlock param).
+local lowMemoryBlock = 450000 -- Nice for 1 Mb of RAM
 local lang = "English" -- English, Russian
 local projectName = 'buckshot'
 local assetsPath = string.gsub(string.gsub(require('shell').resolve(require('process').info().path), projectName, "Buckshot_Data/"), 'CrushHandler', "Buckshot_Data/")
 local gpuBuffers = true
 --Enjoy!
+
 --Oleshe, original by Mike Klubnika, check and buy original game on itch.io!
 --If you right owner and want you are content to be deleted, please, contact with me
+
 local cmp = require('component')
 local event = require('event')
 local uni = require('unicode')
+local term = require('term')
 local fs = require('filesystem')
 local seriala = require('serialization')
 local gpu = cmp.gpu
+local prevState = ''
 local function updateState(state)
-    gpu.set(1,50,state..string.rep(' ',160))
+    gpu.set(1,50,string.rep(' ',uni.len(prevState)))
+    gpu.set(1,50,state)
+    prevState = state
     if gpuBuffers then
         gpu.bitblt()
     end
@@ -24,11 +32,22 @@ local ingoreBackspace
 local buttons = {}
 local callEverytime = {}
 local deltaTime = 0
+local skyBoxColor = 0x111111
 local scripts = {}
 local removeFromETList = {}
 local addFromETList = {}
 local timeWas = os.clock()
 local methods = {}
+local waitTillETEnds = {}
+local prevUserState = ''
+function methods.engineLoadingState(state)
+    gpu.set(160-uni.len(prevUserState),50,string.rep(' ',#prevUserState))
+    gpu.set(160-uni.len(state),50,state)
+    prevUserState = state
+    if gpuBuffers then
+        gpu.bitblt()
+    end
+end
 local UI = {}
 local symbols = {energy = "⚡",skull = "☠",emptyDot="○",fullDot = "●",rimNumOne="Ⅰ",rimNumTwo='Ⅱ',shell = "⁍"}
 local colorFilter = 0xFFFFFF
@@ -36,13 +55,18 @@ local types = {
   panel = 1,
   text = 2
 }
-local itemsID = {
-    beer = 1,
-    glass = 2,
-    handcuffs = 3,
-    vape = 4,
-    saw = 5
-}
+function methods.debugPrint(str,speed)
+    gpu.setForeground(0xFFFFFF)
+    if type(str) == 'table' then
+        print(seriala.serialize(str))
+    else
+        print(str)
+    end
+    if gpuBuffers then
+        gpu.bitblt()
+    end
+    os.sleep(speed or 1)
+end
 function methods.getID()
     return math.random(0,999999999)
 end
@@ -102,10 +126,36 @@ for i,v in pairs(keyboard) do
 end
 updateState("Loading colors")
 local function hexToRgb(integerColor)
+  integerColor = math.ceil(integerColor)
   return integerColor >> 16, integerColor >> 8 & 0xFF, integerColor & 0xFF
 end
 local function rgbToHex(r, g, b)
+  r,g,b = math.ceil(r), math.ceil(g),math.ceil(b)
   return r << 16 | g << 8 | b
+end
+local function colorMultipleByOne(clr1,num)
+    local r,g,b = hexToRgb(clr1)
+    return rgbToHex(r*num,g*num,b*num)
+end
+local function colorMinus(clr1, clr2)
+    local r1,g1,b1 = hexToRgb(clr1)
+    local r2,g2,b2 = hexToRgb(clr2)
+    return rgbToHex(r1-r2,g1-g2,b1-b2)
+end
+local function colorPlus(clr1, clr2)
+    local r1,g1,b1 = hexToRgb(clr1)
+    local r2,g2,b2 = hexToRgb(clr2)
+    return rgbToHex(r1+r2,g1+g2,b1+b2)
+end
+function methods.checkMaxColor(clr, isFadeIn)
+    local onReview = math.max(skyBoxColor,math.min(clr,0xFFFFFF))
+    if not isFadeIn and onReview == skyBoxColor then
+        return clr, true
+    end
+    return onReview
+end
+function methods.setColorFilter(clr)
+    colorFilter = clr
 end
 local function blend(src, filter)
     local sr, sg, sb = hexToRgb(src or 0x010101)
@@ -118,8 +168,44 @@ local function blend(src, filter)
     return rgbToHex(r, g, b)
 end
 gpu.setForeground(0xFFFFFF)
-gpu.setBackground(0x111111)
+gpu.setBackground(skyBoxColor)
 updateState("Loading filesystem")
+function methods.readInMethod(path,sound,method)
+  if fs.exists(path) then
+    local bonus = 0
+    if sound then
+      bonus = -1
+    end
+    local handle = io.open(path,'r')
+    local readData = 1
+    if lowMemory then
+        local positionNow = 0
+        while true do
+            positionNow = positionNow + lowMemoryBlock
+            readData = handle:read(lowMemoryBlock)
+            if not readData then
+                break
+            end
+            if positionNow >= fs.size(path) then
+                readData = string.sub(readData,1,-2)
+                method(readData)
+                break
+            end
+            method(readData)
+        end
+        handle:close()
+        return
+    end
+    method(handle:read(fs.size(path)+bonus))
+    handle:close()
+  else
+      if gpuBuffers then
+        gpu.setActiveBuffer(0)
+      end
+      stderr:write("No file founded: " .. currentLoading..'\nPlease, check assetsPath param in the first lines of programm and package integrity\nIf needed, reinstall or bruh install full')
+      os.exit(1)
+  end
+end
 function methods.read(path,sound)
   if fs.exists(path) then
     local bonus = 0
@@ -134,8 +220,8 @@ function methods.read(path,sound)
       if gpuBuffers then
         gpu.setActiveBuffer(0)
       end
-      print("No file founded: " .. currentLoading..'\nPlease, check assetsPath param in first lines of programm')
-      os.exit(1)    
+      stderr:write("No file founded: " .. currentLoading..'\nPlease, check assetsPath param in the first lines of programm and package integrity\nIf needed, reinstall or bruh install full')
+      os.exit(1)
   end
 end
 function methods.write(path, data)
@@ -155,8 +241,7 @@ function methods.execute(name,method)
             return scripts[name][method]()
         end
     end
-    print("Scripts not found: ".. name ..'.'..method)
-    os.sleep(2)
+    methods.debugPrint("Scripts not found: ".. name ..'.'..method)
 end
 --Reading all scripts and making data base
 local scriptsPath = assetsPath .. 'Scripts/'
@@ -238,11 +323,14 @@ end
 function methods.flushUI()
     UI = {}
 end
+function methods.waitTillET(id, method)
+    waitTillETEnds[id] = method
+end
 function methods.removeFromET(what)
     table.insert(removeFromETList,what)
 end
 updateState("Loading engine features")
-function methods.tick(skipET) -- skipEveryTime thing
+function methods.tick(skipET) -- skipEveryTime skips scripts that need to be called every tick
   deltaTime = os.clock()-timeWas
   timeWas = os.clock()
   if not skipET then
@@ -253,6 +341,10 @@ function methods.tick(skipET) -- skipEveryTime thing
   for i = 1, #removeFromETList do
     if callEverytime[removeFromETList[i]] then
         callEverytime[removeFromETList[i]] = nil
+        if waitTillETEnds[removeFromETList[i]] then
+            waitTillETEnds[removeFromETList[i]]()
+            waitTillETEnds[removeFromETList[i]] = nil
+        end
     end
   end
   removeFromETList = {}
@@ -275,24 +367,30 @@ function methods.tick(skipET) -- skipEveryTime thing
 end
 --main init
 function methods.fadeIn(time, to)
-  time = time or 2
+  time = time or 1
+  local speed = time / 0.1
   to = to or 0xFFFFFF
-  local neededDeltaTime = to/time
   local ID = methods.getID()
   callEverytime[ID] = function()
-    colorFilter = colorFilter + 0x010101 * deltaTime
-    if colorFilter > to then
-        removeFromET(ID)
+    colorFilter, done = methods.checkMaxColor(colorPlus(colorFilter, colorMultipleByOne(0x010101,deltaTime*speed)), true)
+    if colorFilter >= to or done then
+        methods.removeFromET(ID)
+        return
     end
   end
 end
 function methods.fadeOut(time, to)
-  to = to or 0x010101*2
-    while colorFilter > to do
-      colorFilter = colorFilter - 0x010101
-      methods.tick(true)
-      methods.busyLoop(0.001)
+  time = time or 1
+  local speed = time / 0.1
+  to = to or 0x0
+  local ID = methods.getID()
+  callEverytime[ID] = function()
+    colorFilter, done = methods.checkMaxColor(colorMinus(colorFilter, colorMultipleByOne(0x010101,deltaTime*speed)))
+    if colorFilter < to or done  then
+        methods.removeFromET(ID)
+        return
     end
+  end
 end
 --loading sound stuff
 updateState("Loading sound")
@@ -320,10 +418,12 @@ function methods.playSound(name, fadeIn)
       tape.write(sounds[name])
       songLenght = #sounds[name]
     else
-      local data = methods.read(soundsPath..name..'.dfpwm',true)
-      songLenght = #data
-      tape.write(data)
-      os.sleep(0)
+      songLenght = 0
+      methods.readInMethod(soundsPath..name..'.dfpwm',true,
+      function(data) 
+        tape.write(data)
+        songLenght = songLenght + #data
+      end)
     end
     tape.seek(-tape.getSize())
     if fadeIn then
@@ -576,9 +676,6 @@ function methods.invoke(code,time)
         end
     end
 end
-function methods.colorFilterSet(color)
-    colorFilter = color
-end
 --Compiling scripts
 local nowMethods = methods.deepcopy(methods)
 nowMethods.loc = loc
@@ -590,26 +687,29 @@ for i = 1, #scriptsFolderList do
     scripts[string.gsub(scriptsFolderList[i],'.lua','')] = runScript(methods.read(scriptsPath..'/'..scriptsFolderList[i]), nowMethods, scriptsFolderList[i])
     os.sleep(0)
 end
---Executeing all Scripts
+function methods.exit()
+    methods.flushUI()
+    if gpuBuffers then
+        gpu.setActiveBuffer(0)
+        gpu.freeBuffer(allocatedBuffer)
+    end
+    methods.tick(true)
+    gpu.setForeground(0xFFFFFF)
+    gpu.setBackground(0x0)
+    updateState('Exiting...')
+    methods.stopSounds()
+    term.clear()
+    --Bye!
+    os.exit(0)
+end
+updateState("Starting")
+--Executing all Scripts
 for i, v in pairs(scripts) do
     if v["Start"] then
         v["Start"]()
     end
 end
-function methods.exit()
-    --Stop stound
-    methods.fadeOut()
-    methods.stopSounds()
-    --Restoring defaults
-    gpu.setActiveBuffer(0)
-    gpu.freeBuffer(allocatedBuffer)
-    gpu.setForeground(0xFFFFFF)
-    gpu.setBackground(0x0)
-    require('term').clear()
-    --Bye!
-    os.exit(0)
-end
-updateState("Starting!")
+methods.engineLoadingState = nil
 --main loop
 while true do
   local name,_,e1,e2,e3 = event.pull(0)

@@ -1,6 +1,16 @@
 local projectName = "buckshot"
+local beep = require('computer').beep
 local path = string.gsub(require('shell').resolve(require('process').info().path),'CrushHandler', projectName..".lua")
+beep(50,0.05)
 local programmHandle, why = loadfile(path)
+if type(programmHandle) ~= 'function' and why then
+	require('term').clear()
+	require('component').gpu.setActiveBuffer(0)
+	io.stderr:write(why..'\n')
+	beep(450,0.1)
+	return
+end
+--MineOS System.call function
 local function call(method, ...)
 	local args = {...}
 
@@ -54,16 +64,14 @@ local function call(method, ...)
 
 	return true
 end
-if type(programmHandle) ~= 'function' and why then
-	require('term').clear()
-	require('component').gpu.setActiveBuffer(0)
-	io.stderr:write(why..'\n')
-end
-local suc, path, line, traceback = call(programmHandle)
+local suc, _, _, traceback = call(programmHandle)
 if suc == false then
-	require('term').clear()
 	require('component').gpu.setActiveBuffer(0)
 	require('component').gpu.freeBuffer(allocatedBuffer)
 	allocatedBuffer = nil
 	io.stderr:write(traceback..'\n')
+	beep(450,0.1)
+	beep(450,0.1)
+	return
 end
+beep(20,0.05)

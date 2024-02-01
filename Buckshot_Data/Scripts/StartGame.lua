@@ -1,13 +1,14 @@
 local uni = require('unicode')
 Start = function()
+	engineLoadingState("Loading sound")
 	playSound("Before Every Load",true)
-	colorFilterSet(0x0)
-	local len = math.ceil(uni.len(loc.welcomeMessage)/2)
-	local currentTextIndex = text(160/2-len,25,0xFFFFFF,loc.welcomeMessage)
-	fadeIn()
+	engineLoadingState("Loading main UI")
+	setColorFilter(0x0)
+	local currentTextIndex = text(160/2-math.ceil(uni.len(loc.welcomeMessage)/2), 25, 0xFFFFFF, loc.welcomeMessage)
+	fadeIn(1.5,0xDDDDDD)
 	invoke(function()
 		UI[currentTextIndex] = nil
-		colorFilter = 0xDDDDDD
+		setColorFilter(0xDDDDDD)
 		--Lets let user pick name
 		local len = math.ceil(uni.len(loc.yourName)/2)
 		local currentTextIndex = text(160/2-len,25,0xFFFFFF,loc.yourName)
@@ -19,10 +20,8 @@ Start = function()
 		inputHandle.onInputFinished = function()
 		  removeFromET(indexOfHandleToText)
 		  scripts.RoundManager.PLAYERNICKNAME = inputHandle.text
-		  invoke(function()
-			--Now, lets go with round manager and ask for a new round.
-			execute('RoundManager','ShowEnergy')
-		  end,0.5)
+	      --Now, lets go with round manager and ask for a new round.
+		  execute('RoundManager','ShowEnergy')
 		end
-	end, 1.5)
+	end, 2.5)
 end
