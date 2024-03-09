@@ -1,9 +1,10 @@
 local loadMusicFiles = false
-local lowMemory = false --!Dont use it now, unless you need more emotions from sound. That will reduce RAM costs when loading big files, but will take more time (Check lowMemoryBlock param).
-local lowMemoryBlock = 450000 -- Nice for 1 Mb of RAM
+local lowMemory = true --!Dont use it now, unless you need more emotions from sound. That will reduce RAM costs when loading big files, but will take more time (Check lowMemoryBlock param).
+local lowMemoryBlock = 4120000 -- Nice for 1 Mb of RAM
 local lang = "English" -- English, Russian
 local projectName = 'buckshot'
-local assetsPath = string.gsub(string.gsub(require('shell').resolve(require('process').info().path), projectName, "Buckshot_Data/"), 'CrushHandler', "Buckshot_Data/")
+local maxFPS = 300
+local assetsPath = string.gsub(string.gsub(require('shell').resolve(require('process').info().path), projectName, projectName.."_Data/"), 'CrushHandler', projectName.."_Data/")
 local gpuBuffers = true
 --Enjoy!
 
@@ -18,6 +19,12 @@ local fs = require('filesystem')
 local seriala = require('serialization')
 local gpu = cmp.gpu
 local prevState = ''
+for i,v in pairs(event.handlers) do
+    if v.key == "UnknownEngine post sound process" then
+        event.handlers[i] = nil
+        break
+    end
+end
 local function updateState(state)
     gpu.set(1,50,string.rep(' ',uni.len(prevState)))
     gpu.set(1,50,state)
@@ -27,7 +34,9 @@ local function updateState(state)
     end
 end
 updateState("Loading main")
+local frames = 0
 local lastEvent = {}
+local exiting
 local ingoreBackspace
 local buttons = {}
 local callEverytime = {}
@@ -157,6 +166,9 @@ end
 function methods.setColorFilter(clr)
     colorFilter = clr
 end
+function methods.getColorFilter()
+    return colorFilter
+end
 local function blend(src, filter)
     local sr, sg, sb = hexToRgb(src or 0x010101)
     local fr, fg, fb = hexToRgb(filter or 0x010101)
@@ -170,42 +182,6 @@ end
 gpu.setForeground(0xFFFFFF)
 gpu.setBackground(skyBoxColor)
 updateState("Loading filesystem")
-function methods.readInMethod(path,sound,method)
-  if fs.exists(path) then
-    local bonus = 0
-    if sound then
-      bonus = -1
-    end
-    local handle = io.open(path,'r')
-    local readData = 1
-    if lowMemory then
-        local positionNow = 0
-        while true do
-            positionNow = positionNow + lowMemoryBlock
-            readData = handle:read(lowMemoryBlock)
-            if not readData then
-                break
-            end
-            if positionNow >= fs.size(path) then
-                readData = string.sub(readData,1,-2)
-                method(readData)
-                break
-            end
-            method(readData)
-        end
-        handle:close()
-        return
-    end
-    method(handle:read(fs.size(path)+bonus))
-    handle:close()
-  else
-      if gpuBuffers then
-        gpu.setActiveBuffer(0)
-      end
-      stderr:write("No file founded: " .. currentLoading..'\nPlease, check assetsPath param in the first lines of programm and package integrity\nIf needed, reinstall or bruh install full')
-      os.exit(1)
-  end
-end
 function methods.read(path,sound)
   if fs.exists(path) then
     local bonus = 0
@@ -331,8 +307,8 @@ function methods.removeFromET(what)
 end
 updateState("Loading engine features")
 function methods.tick(skipET) -- skipEveryTime skips scripts that need to be called every tick
-  deltaTime = os.clock()-timeWas
-  timeWas = os.clock()
+  frames = frames + 1
+  timeCheckpoint = os.clock()
   if not skipET then
     for i,v in pairs(callEverytime) do
       v(i)
@@ -361,14 +337,20 @@ function methods.tick(skipET) -- skipEveryTime skips scripts that need to be cal
       gpu.set(obj.x,obj.y,obj.text)
     end
   end
+  gpu.setForeground(0xFFFFFF)
+  gpu.setBackground(0x0)
+  gpu.set(1,1,tostring(frames) .. "|" .. deltaTime)
   if gpuBuffers then
     gpu.bitblt()
   end
+  deltaTime = timeCheckpoint-timeWas
+  while os.clock() < timeWas + 1/maxFPS do end
+  deltaTime = math.max(deltaTime,deltaTime + (1/maxFPS -deltaTime))
+  timeWas = os.clock()
 end
 --main init
-function methods.fadeIn(time, to)
-  time = time or 1
-  local speed = time / 0.1
+function methods.fadeIn(to,speed)
+  speed = speed or 100
   to = to or 0xFFFFFF
   local ID = methods.getID()
   callEverytime[ID] = function()
@@ -379,9 +361,8 @@ function methods.fadeIn(time, to)
     end
   end
 end
-function methods.fadeOut(time, to)
-  time = time or 1
-  local speed = time / 0.1
+function methods.fadeOut(to,speed)
+  speed = speed or 100
   to = to or 0x0
   local ID = methods.getID()
   callEverytime[ID] = function()
@@ -411,19 +392,33 @@ function methods.playSound(name, fadeIn)
     local tape = cmp.tape_drive
     tape.stop()
     tape.seek(-tape.getSize())
-    tape.write(string.rep("",tape.getSize()))
-    tape.seek(-tape.getSize())
+    tape.stop()
     local songLenght
     if loadMusicFiles then
       tape.write(sounds[name])
       songLenght = #sounds[name]
     else
-      songLenght = 0
-      methods.readInMethod(soundsPath..name..'.dfpwm',true,
-      function(data) 
-        tape.write(data)
-        songLenght = songLenght + #data
-      end)
+      local path = soundsPath..name..'.dfpwm'
+      local handle = io.open(path,'rb')
+      songLenght = fs.size(path)
+      local readData = 1
+      if lowMemory then
+        local filesize = fs.size(path)
+        local bytery = 0
+        repeat
+          local bytes = handle:read(lowMemoryBlock)
+          if bytes and #bytes > 0 then
+            bytery = bytery + #bytes
+            tape.write(bytes)
+          end
+        until not bytes or bytery > filesize
+      else
+        tape.write(handle:read(fs.size(path)-1))
+      end
+      handle:close()
+      tape.stop()
+      tape.seek(-tape.getSize())
+      tape.stop()
     end
     tape.seek(-tape.getSize())
     if fadeIn then
@@ -431,13 +426,13 @@ function methods.playSound(name, fadeIn)
     end
     local i = 0
     local need = 0
-    local speed = 0.5
+    local speed = 0.025
     local ID = methods.getID()
     callEverytime[ID] = function()
       need = deltaTime + need
       if need >= speed then
         need = 0
-        i = i + 0.1
+        i = i + 0.01
         if i == 1 then
           methods.removeFromET(ID)
           return
@@ -459,152 +454,30 @@ end
 function methods.stopSounds()
   if cmp.isAvailable('tape_drive') then
     local i = 1
-    while true do
-      i = i - 0.1
-      methods.busyLoop(0.2)
-      if i <= 0 then
-        break
-      end
-      cmp.tape_drive.setVolume(i)
-    end
-    cmp.tape_drive.stop()
-  end
-end
-local function makeCurrentShells(roundNum)
-    local shellsCount
-    if roundNum == 2 then
-        shellsCount = math.random(3,5)
-    elseif roundNum == 1 then
-        shellsCount = math.random(2,4)
-    end
-    for i = 1, shellsCount do
-        local shell = math.random(0,1)
-        table.insert(currentShells,shell)
-        local color
-        if shell == 1 then
-            color = 0xBB1111
-        else
-            color = 0x1111BB
-        end
-        text(160/2+1-(i-math.ceil(shellsCount/2)),25,color,symbols.shell)
-    end
-    tick()
-    os.sleep(3)
-    UI = {}
-    tick()
-end
-local function addToInventory(what, slot, id)
-    slot = slot or 0
-    if what[slot] > 0 then
-        return false
+    if exiting then
+        local index
+        index = event.register("UnknownEngine post sound process",function()
+           i = i - 0.01
+           cmp.tape_drive.setVolume(i)
+          if i <= 0 then
+            event.cancel(index)
+            cmp.tape_drive.stop()
+            cmp.tape_drive.setVolume(1)
+            cmp.tape_drive.seek(-math.huge)
+          end
+        end,0.025,math.huge)
     else
-        what[slot] = id
-        return true
-    end
-end
-local function getItemName(itemID)
-    if itemID == itemsID.beer then
-        return '🥫BEER'
-    elseif itemID == itemsID.glass then
-        return "🔍MAGNIFIER"
-    elseif itemID == itemsID.saw then
-        return '🔪HANDSAW'
-    elseif itemID == itemsID.vape then
-        return "🚬CIGARETTE"
-    elseif itemID == itemsID.handcuffs then
-        return "🔗HANDCUFFS"
-    else
-        return "EMPTY"
-    end
-end
-local function makeItems(roundNum)
-    local function generateItem()
-        return math.random(1,5)
-    end
-    local queue = {}
-    for i = 1, roundNum*2-2 do
-        addToInventory(dealerInventory,math.random(1,8),generateItem())
-        table.insert(queue,generateItem())
-    end
-    UI = {}
-    local panelIndex = panel(60,30,60,18,0xFFFFFF)
-    local panel2Index = panel(62,31,56,16,0xAAAAAA)
-    local itemPresentIndex = text(78,39,0xDDDDDD,"")
-    local buttonIndexes = {}
-    local function foundByIndex(index)
-        for i = 1,#buttonIndexes do
-            if buttonIndexes[i][1] == index then
-                return i
-            end
+        while true do
+          i = i - 0.01
+          methods.busyLoop(0.025)
+          if i <= 0 then
+            break
+          end
+          cmp.tape_drive.setVolume(i)
         end
-    end
-    local function updateCurrentItem()
-        if not queue[1] then
-            UI = {}
-            os.sleep(1)
-            tick(true)
-            makeCurrentShells(roundNum)
-        else
-            table.remove(queue,1)
-            UI[itemPresentIndex].text = getItemName(queue[1])
-        end
-    end
-    local function anyButtonClick(index,x,y,mb)
-        gpu.setBackground(0x0)
-        gpu.setForeground(0xFFFFFF)
-        if mb == 0 then
-            if addToInventory(playerInventory, foundByIndex(index), queue[1]) then
-                UI[buttonIndexes[foundByIndex(index)][3]].text = getItemName(queue[1])
-                updateCurrentItem()
-            end
-        end
-    end
-    buttonIndexes[1] = button(8,30,10,5,0xDDDDDD,0xAAAAAA,getItemName(playerInventory[1]),anyButtonClick)
-    buttonIndexes[2] = button(20,30,10,5,0xDDDDDD,0xAAAAAA,getItemName(playerInventory[2]),anyButtonClick)
-    buttonIndexes[3] = button(8,46,10,5,0xDDDDDD,0xAAAAAA,getItemName(playerInventory[3]),anyButtonClick)
-    buttonIndexes[4] = button(20,46,10,5,0xDDDDDD,0xAAAAAA,getItemName(playerInventory[4]),anyButtonClick)
-    buttonIndexes[5] = button(100,30,10,5,0xDDDDDD,0xAAAAAA,getItemName(playerInventory[5]),anyButtonClick)
-    buttonIndexes[6] = button(110,30,10,5,0xDDDDDD,0xAAAAAA,getItemName(playerInventory[6]),anyButtonClick)
-    buttonIndexes[7] = button(100,46,10,5,0xDDDDDD,0xAAAAAA,getItemName(playerInventory[7]),anyButtonClick)
-    buttonIndexes[8] = button(110,46,10,5,0xDDDDDD,0xAAAAAA,getItemName(playerInventory[8]),anyButtonClick)
-    updateCurrentItem()
-    tick(true)
-end
-local function initRound(roundNum)
-  UI = {}
-  local roundNums = text(77,25,0xFFFFFF,symbols.rimNumOne.." "..symbols.rimNumTwo..' '..symbols.skull)
-  local function makeLine(last)
-    local line = ""
-    local function getState(num)
-      if roundNum == num then
-        if last then
-          return symbols.emptyDot
-        else
-          return symbols.fullDot
-        end
-       elseif roundNum > num then
-         return symbols.fullDot
-        else
-          return symbols.emptyDot
-      end
-    end
-    for i = 1, 3 do
-      line = line .. getState(i) .. ' '
-    end
-    return line
+        cmp.tape_drive.stop()
+     end
   end
-  completedRounds = text(77,26,0xFFFFFF,makeLine())
-  tick(true)
-  local turn = false
-  for i = 1, 6 do
-    turn = not turn
-    UI[completedRounds].text = makeLine(turn)
-    os.sleep(0.3)
-    tick()
-  end
-  os.sleep(1)
-  UI = {}
-  makeItems(roundNum)
 end
 updateState("Compiling scripts...")
 -- Big thanks to fingercomp bc i dont know how is this shi works
@@ -682,12 +555,16 @@ nowMethods.loc = loc
 nowMethods.callEverytime = callEverytime
 nowMethods.UI = UI
 nowMethods.symbols = symbols
+nowMethods.skyBoxColor = skyBoxColor
 nowMethods.scripts = scripts
+nowMethods.assetsPath = assetsPath
+nowMethods.rootPath = string.gsub(assetsPath,'Buckshot_Data/','')
 for i = 1, #scriptsFolderList do 
     scripts[string.gsub(scriptsFolderList[i],'.lua','')] = runScript(methods.read(scriptsPath..'/'..scriptsFolderList[i]), nowMethods, scriptsFolderList[i])
     os.sleep(0)
 end
 function methods.exit()
+    exiting = true
     methods.flushUI()
     if gpuBuffers then
         gpu.setActiveBuffer(0)
@@ -710,17 +587,19 @@ for i, v in pairs(scripts) do
     end
 end
 methods.engineLoadingState = nil
+local waitFPS = os.clock()
 --main loop
 while true do
   local name,_,e1,e2,e3 = event.pull(0)
   lastEvent = {name,"",e1,e2,e3}
+  if waitFPS < os.clock() then
+    frames = 0
+    waitFPS = os.clock() + 1
+  end
   if name == 'key_up' then
     if e2 == 14 and not ignoreBackspace then
       methods.exit()
     end
-  end
-  if name == 'touch' then
-    click(e1,e2,e3)
   end
   methods.tick()
 end

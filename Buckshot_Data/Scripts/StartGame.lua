@@ -1,12 +1,12 @@
 local uni = require('unicode')
-Start = function()
-	engineLoadingState("Loading sound")
-	playSound("Before Every Load",true)
-	engineLoadingState("Loading main UI")
-	setColorFilter(0x0)
+function Start()
+	--engineLoadingState("Loading sound")
+	--playSound("Before Every Load",true)
+	--engineLoadingState("Loading main UI")
+	setColorFilter(skyBoxColor)
 	local currentTextIndex = text(160/2-math.ceil(uni.len(loc.welcomeMessage)/2), 25, 0xFFFFFF, loc.welcomeMessage)
-	fadeIn(1.5,0xDDDDDD)
-	invoke(function()
+	--fadeIn(0xDDDDDD,1.5)
+	--[[invoke(function()
 		UI[currentTextIndex] = nil
 		setColorFilter(0xDDDDDD)
 		--Lets let user pick name
@@ -23,5 +23,13 @@ Start = function()
 	      --Now, lets go with round manager and ask for a new round.
 		  execute('RoundManager','ShowEnergy')
 		end
-	end, 2.5)
+	end, 2.5)]]
+    local ID = getID()
+    callEverytime[ID] = function()
+        if getColorFilter() == 0xFFFFFF then
+            fadeOut()
+        elseif getColorFilter() == skyBoxColor then
+            fadeIn()
+        end
+    end
 end
