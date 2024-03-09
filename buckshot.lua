@@ -182,14 +182,11 @@ end
 gpu.setForeground(0xFFFFFF)
 gpu.setBackground(skyBoxColor)
 updateState("Loading filesystem")
-function methods.read(path,sound)
+function methods.read(path)
   if fs.exists(path) then
     local bonus = 0
-    if sound then
-      bonus = -1
-    end
     local handle = io.open(path,'r')
-    local readData = handle:read(fs.size(path)+bonus)
+    local readData = handle:read(fs.size(path))
     handle:close()
     return readData
   else
