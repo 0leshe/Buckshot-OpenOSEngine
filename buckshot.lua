@@ -337,9 +337,6 @@ function methods.tick(skipET) -- skipEveryTime skips scripts that need to be cal
       gpu.set(obj.x,obj.y,obj.text)
     end
   end
-  gpu.setForeground(0xFFFFFF)
-  gpu.setBackground(0x0)
-  gpu.set(1,1,tostring(frames) .. "|" .. deltaTime)
   if gpuBuffers then
     gpu.bitblt()
   end
